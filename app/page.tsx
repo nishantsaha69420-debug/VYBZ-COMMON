@@ -222,46 +222,58 @@ export default function VybzMainPage() {
       activeRoom?.status === "FINISHED" || activeRoom?.status === "MATCH_OVER";
     const intervalMs = isFinished ? 4000 : 800;
 
-    const pollInterval = setInterval(async () => {
+    let cancelled = false;
+    let pollTimer: NodeJS.Timeout;
+
+    const poll = async () => {
       try {
         const freshState = await apiClient.getRoom(roomIdentifier, playerId);
-        setActiveRoom((prev: any) => {
-          if (prev?.status !== freshState.status) {
-            if (freshState.status === "QUESTION") {
-              snd.click();
-            } else if (freshState.status === "RESULTS") {
-              const myAns = freshState.players?.find(
-                (p: any) => p.userId === playerId || p.id === playerId
-              )?.lastAnswer;
-              if (myAns?.isCorrect) {
-                snd.success();
-              } else {
-                snd.error();
+        if (!cancelled) {
+          setActiveRoom((prev: any) => {
+            if (prev?.status !== freshState.status) {
+              if (freshState.status === "QUESTION") {
+                snd.click();
+              } else if (freshState.status === "RESULTS") {
+                const myAns = freshState.players?.find(
+                  (p: any) => p.userId === playerId || p.id === playerId
+                )?.lastAnswer;
+                if (myAns?.isCorrect) {
+                  snd.success();
+                } else {
+                  snd.error();
+                }
+              } else if (freshState.status === "FINISHED") {
+                snd.coin();
               }
-            } else if (freshState.status === "FINISHED") {
-              snd.coin();
             }
-          }
-          return freshState;
-        });
+            return freshState;
+          });
 
-        if (freshState.status === "FINISHED") {
-          setTelemetryStatus("● TOURNAMENT CONCLUDED");
-        } else if (
-          freshState.status === "QUESTION" ||
-          freshState.status === "RESULTS"
-        ) {
-          setTelemetryStatus(`● PLAYING ROUND 0${(freshState.currentQuestionIndex ?? 0) + 1}`);
-        } else {
-          setTelemetryStatus(`● ROOM: ${freshState.roomCode || freshState.code}`);
+          if (freshState.status === "FINISHED") {
+            setTelemetryStatus("● TOURNAMENT CONCLUDED");
+          } else if (
+            freshState.status === "QUESTION" ||
+            freshState.status === "RESULTS"
+          ) {
+            setTelemetryStatus(`● PLAYING ROUND 0${(freshState.currentQuestionIndex ?? 0) + 1}`);
+          } else {
+            setTelemetryStatus(`● ROOM: ${freshState.roomCode || freshState.code}`);
+          }
         }
       } catch {
         // Non-fatal polling error
       }
-    }, intervalMs);
+
+      if (!cancelled) {
+        pollTimer = setTimeout(poll, intervalMs);
+      }
+    };
+
+    poll();
 
     return () => {
-      clearInterval(pollInterval);
+      cancelled = true;
+      if (pollTimer) clearTimeout(pollTimer);
     };
   }, [
     activeRoom?.roomId,

@@ -2,7 +2,8 @@
 // Extracts structured facts and inferences using OpenAI Responses API.
 // Strictly separates verifiable source facts from AI-derived inferences.
 
-import { generateStructuredJson, isOpenAiConfigured } from "../openai";
+import { generateStructuredJson, isGeminiConfigured } from "../gemini";
+import { Type, Schema } from "@google/genai";
 import { ParsedChatMessage, ChatAnalysisResult } from "@/types/vybz";
 
 export async function analyzeChatLore(
@@ -32,8 +33,8 @@ export async function analyzeChatLore(
     })),
   };
 
-  // 2. Extract Inferences via OpenAI Responses API if configured
-  if (isOpenAiConfigured && messages.length > 0) {
+  // 2. Extract Inferences via Gemini Models API if configured
+  if (isGeminiConfigured && messages.length > 0) {
     try {
       // Send compact sample of high-signal messages rather than blind entire dump
       const sampleMessages = messages
@@ -53,10 +54,50 @@ recurringArguments (string[]), recurringActivities (string[])`;
 
       const userPrompt = `Participants: ${participants.join(", ")}\n\nChat Excerpt:\n${sampleMessages}`;
 
+      const responseSchema: Schema = {
+        type: Type.OBJECT,
+        properties: {
+          recurringTopics: { type: Type.ARRAY, items: { type: Type.STRING } },
+          interests: { type: Type.ARRAY, items: { type: Type.STRING } },
+          memorableEvents: { type: Type.ARRAY, items: { type: Type.STRING } },
+          insideJokes: { type: Type.ARRAY, items: { type: Type.STRING } },
+          opinions: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                author: { type: Type.STRING },
+                topic: { type: Type.STRING },
+                opinion: { type: Type.STRING },
+                sourceMessageId: { type: Type.STRING },
+              },
+              required: ["author", "topic", "opinion"],
+            },
+          },
+          relationships: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                pair: { type: Type.ARRAY, items: { type: Type.STRING } },
+                dynamic: { type: Type.STRING },
+                sentiment: { type: Type.STRING },
+              },
+              required: ["pair", "dynamic", "sentiment"],
+            },
+          },
+          groupDynamics: { type: Type.ARRAY, items: { type: Type.STRING } },
+          personalitySignals: { type: Type.OBJECT }, // Not strictly typed in SDK schema for arbitrary keys, but fallback applies
+          recurringArguments: { type: Type.ARRAY, items: { type: Type.STRING } },
+          recurringActivities: { type: Type.ARRAY, items: { type: Type.STRING } },
+        },
+      };
+
       const aiInferences = await generateStructuredJson<any>({
         systemPrompt,
         userPrompt,
         temperature: 0.2,
+        responseSchema,
       });
 
       return {
@@ -75,7 +116,7 @@ recurringArguments (string[]), recurringActivities (string[])`;
         },
       };
     } catch (err) {
-      console.warn("OpenAI Chat Analysis fallback triggered:", err);
+      console.warn("Gemini Chat Analysis fallback triggered:", err);
     }
   }
 

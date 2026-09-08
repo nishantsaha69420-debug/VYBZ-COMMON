@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateStructuredJson, isOpenAiConfigured } from "@/lib/openai";
+import { generateStructuredJson, isGeminiConfigured } from "@/lib/gemini";
+import { Type, Schema } from "@google/genai";
 import { GameMasterRequest, GameMasterResponse } from "@/types/api";
 
 export async function POST(request: NextRequest) {
@@ -10,7 +11,7 @@ export async function POST(request: NextRequest) {
     const topPlayer = players.slice().sort((a, b) => b.score - a.score)[0];
     const topScore = topPlayer?.score || 0;
 
-    if (isOpenAiConfigured) {
+    if (isGeminiConfigured) {
       try {
         const systemPrompt = `You are the VYBZ AI Game Master arbiter.
 Evaluate the current game bench state and suggest a dramatic arcade commentary action.
@@ -19,15 +20,27 @@ Never mutate the game directly. Return pure JSON with keys: action, message, dif
 
         const userPrompt = `Round: ${round}\nScores: ${JSON.stringify(scores)}\nTop Player: ${topPlayer?.name || "Player"} with ${topScore} pts`;
 
+        const responseSchema: Schema = {
+          type: Type.OBJECT,
+          properties: {
+            action: { type: Type.STRING },
+            message: { type: Type.STRING },
+            difficulty: { type: Type.STRING },
+            category: { type: Type.STRING },
+          },
+          required: ["action", "message"],
+        };
+
         const res = await generateStructuredJson<GameMasterResponse>({
           systemPrompt,
           userPrompt,
           temperature: 0.4,
+          responseSchema,
         });
 
         return NextResponse.json(res);
       } catch (err) {
-        console.warn("OpenAI Game Master fallback triggered:", err);
+        console.warn("Gemini Game Master fallback triggered:", err);
       }
     }
 

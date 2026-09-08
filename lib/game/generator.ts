@@ -1,7 +1,8 @@
 // 5 VYBZ ROM Generator with Strict Source Grounding & Validation
 // Generates questions using OpenAI Responses API and enforces critical invariants.
 
-import { generateStructuredJson, isOpenAiConfigured } from "../openai";
+import { generateStructuredJson, isGeminiConfigured } from "../gemini";
+import { Type, Schema } from "@google/genai";
 import { validateQuestion } from "./validator";
 import { db, isDatabaseConfigured, memoryDb } from "../db";
 import {
@@ -88,17 +89,17 @@ export async function generateGameQuestions(
 
   let rawQuestions: VybzQuestion[] = [];
 
-  // 2. Generate via OpenAI Responses API if configured
-  if (isOpenAiConfigured && eligibleMessages.length >= 4) {
+  // 2. Generate via Gemini Models API if configured
+  if (isGeminiConfigured && eligibleMessages.length >= 4) {
     try {
-      rawQuestions = await generateWithOpenAi({
+      rawQuestions = await generateWithGemini({
         rom,
         count,
         participants: uniqueParticipants,
         eligibleMessages: eligibleMessages.slice(0, 60),
       });
     } catch (err) {
-      console.warn("OpenAI question generation failed, using deterministic grounded fallback:", err);
+      console.warn("Gemini question generation failed, using deterministic grounded fallback:", err);
     }
   }
 
@@ -190,8 +191,8 @@ export async function generateGameQuestions(
   };
 }
 
-// ── OPENAI GENERATION IMPLEMENTATION ─────────────────────────────────────────
-async function generateWithOpenAi(params: {
+// ── GEMINI GENERATION IMPLEMENTATION ─────────────────────────────────────────
+async function generateWithGemini(params: {
   rom: string | VybzRom;
   count: number;
   participants: string[];
@@ -207,28 +208,70 @@ STRICT GROUNDING INVARIANTS:
 2. For WHO_SAID_IT: The correct option's label MUST EXACTLY match the source message author.
 3. Every question MUST have exactly four options: A, B, C, D. All 4 options must be distinct participants from the chat.
 4. quote must match the text of the source message.
-5. Return JSON with key "questions" containing an array of questions.
-Each question schema:
-{
-  id: string,
-  round: string,
-  category: string,
-  prompt: string,
-  quote: string,
-  options: [{ key: "A"|"B"|"C"|"D", label: string, tag: string }],
-  correctAnswer: "A"|"B"|"C"|"D",
-  explanation: string,
-  difficulty: "easy"|"medium"|"hard",
-  sourceType: "WHO_SAID_IT"|"MEMORY"|"OPINION"|"RELATIONSHIP"|"CHAOS",
-  sourceMessageIds: string[]
-}`;
+5. Return JSON with key "questions" containing an array of questions.`;
 
   const userPrompt = `Participants: ${params.participants.join(", ")}\n\nAvailable Real Chat Messages:\n${sampleText}`;
+
+  const questionSchema: Schema = {
+    type: Type.OBJECT,
+    properties: {
+      id: { type: Type.STRING },
+      round: { type: Type.STRING },
+      category: { type: Type.STRING },
+      prompt: { type: Type.STRING },
+      quote: { type: Type.STRING },
+      options: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            key: { type: Type.STRING },
+            label: { type: Type.STRING },
+            tag: { type: Type.STRING },
+          },
+          required: ["key", "label", "tag"],
+        },
+      },
+      correctAnswer: { type: Type.STRING },
+      explanation: { type: Type.STRING },
+      difficulty: { type: Type.STRING },
+      sourceType: { type: Type.STRING },
+      sourceMessageIds: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING },
+      },
+    },
+    required: [
+      "id",
+      "round",
+      "category",
+      "prompt",
+      "quote",
+      "options",
+      "correctAnswer",
+      "explanation",
+      "difficulty",
+      "sourceType",
+      "sourceMessageIds",
+    ],
+  };
+
+  const responseSchema: Schema = {
+    type: Type.OBJECT,
+    properties: {
+      questions: {
+        type: Type.ARRAY,
+        items: questionSchema,
+      },
+    },
+    required: ["questions"],
+  };
 
   const res = await generateStructuredJson<{ questions: VybzQuestion[] }>({
     systemPrompt,
     userPrompt,
     temperature: 0.2,
+    responseSchema,
   });
 
   return Array.isArray(res.questions) ? res.questions : [];
